@@ -6,8 +6,9 @@
 #include <linux/spi/spidev.h>
 #include <stdlib.h>		// malloc
 #include <stdint.h>		// int types
+#include <sys/time.h>		// nanosleep
+#include <time.h>		// nanosleep
 
- 
 #define KHZ_500 500000
 #define MHZ_1 1000000
 #define MHZ_2 2000000
@@ -16,123 +17,146 @@
 #define MHZ_16 16000000
 #define MHZ_32 32000000
 
-#define MCP3208_START_BIT 0x16
-#define MCP3208_SINGLE_ENDED 0x8
-#define MCP3208_CHAN_0 0x0
-#define MCP3208_CHAN_1 0x1
-#define MCP3208_CHAN_2 0x2
-#define MCP3208_CHAN_3 0x3
-#define MCP3208_CHAN_4 0x4
-#define MCP3208_CHAN_5 0x5
-#define MCP3208_CHAN_6 0x6
-#define MCP3208_CHAN_7 0x7
+#define BYTETOBINARYPATTERN "%d%d%d%d%d%d%d%d"
+#define BYTETOBINARY(byte)  \
+  (byte & 0x80 ? 1 : 0), \
+  (byte & 0x40 ? 1 : 0), \
+  (byte & 0x20 ? 1 : 0), \
+  (byte & 0x10 ? 1 : 0), \
+  (byte & 0x08 ? 1 : 0), \
+  (byte & 0x04 ? 1 : 0), \
+  (byte & 0x02 ? 1 : 0), \
+  (byte & 0x01 ? 1 : 0) 
 
-static void dumpstat(const char *name, int fd);
+#define MCP_START_BIT 0x10
+#define MCP_SINGLE_ENDED 0x8
+#define MCP_CHAN_0 MCP_START_BIT | MCP_SINGLE_ENDED | 0x0
+#define MCP_CHAN_1 MCP_START_BIT | MCP_SINGLE_ENDED | 0x1
+#define MCP_CHAN_2 MCP_START_BIT | MCP_SINGLE_ENDED | 0x2
+#define MCP_CHAN_3 MCP_START_BIT | MCP_SINGLE_ENDED | 0x3
+#define MCP_CHAN_4 MCP_START_BIT | MCP_SINGLE_ENDED | 0x4
+#define MCP_CHAN_5 MCP_START_BIT | MCP_SINGLE_ENDED | 0x5
+#define MCP_CHAN_6 MCP_START_BIT | MCP_SINGLE_ENDED | 0x6
+#define MCP_CHAN_7 MCP_START_BIT | MCP_SINGLE_ENDED | 0x7
+
+static void print_byte(uint8_t byte);
+static uint16_t get_mcp_channel_command(uint8_t chan);
 static int spi_transfer(int fd, struct spi_ioc_transfer *tr, int len);
 static int spi_open(const char* device);
 static int spi_close(int fd);
 static int spi_mode(int fd, uint8_t mode);
 static int spi_bits_per_word(int fd, uint8_t bits);
 static int spi_speed(int fd, uint32_t speed);
+static void dumpstat(const char *name, int fd);
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
+
+// static struct mcp_buffer {
+// 	uint8_t byte01;
+// 	uint8_t byte02;
+// };
+
+static const struct timespec requested = {
+	.tv_sec = 0,
+	.tv_nsec = 40000,
+	// .tv_nsec = 0,
+};
+
+static struct timespec remaining;
 
 int main(){
 
 
 
 	int fd = spi_open("/dev/spidev0.0");
-	spi_mode(fd, SPI_MODE_0);
+	spi_mode(fd, SPI_MODE_1);
 	// spi_mode(fd,  SPI_NO_CS | SPI_MODE_2);
 	spi_speed(fd, MHZ_32);
 	dumpstat("SPI device 0: ",fd);
 
-	struct foo {
-		int goo;
-		int goo1;
-		int goo2;
-		int goo3;
-		int goo4;
-		int goo5;
-		int goo6;
-	}tb;
+	// uint16_t command = MCP3208_START_BIT | MCP3208_SINGLE_ENDED
 
-	tb.goo = 16;
-	tb.goo1 = 26;
-	tb.goo2 = 36;
-	tb.goo3 = 46;
-	tb.goo4 = 56;
-	tb.goo5 = 66;
-	tb.goo6 = 76;
+	printf("size %d\n", sizeof(MCP_CHAN_7));
 
-	struct foo rb;
+	// uint32_t foo = MCP_CHAN_7;
+	// uint32_t mcp_tx = ((uint32_t)MCP_CHAN_7) << 14;
+	// uint32_t mcp_rx = 0;
 
-	printf("size of foo: %d\n", sizeof(tb));
+	uint8_t tx[] = {1,8 + 0 << 4,0,0};
+	uint8_t rx[4] = {0}; 
 
-	struct spi_ioc_transfer block = {
-		.tx_buf = (unsigned long)&tb,
-		.rx_buf = (unsigned long)&rb,
-		.len = sizeof(tb),
+
+	struct spi_ioc_transfer mcp_tr ={
+		.tx_buf = (unsigned long)&tx,
+		.rx_buf = (unsigned long)&rx,
+		.len = 4,
 		.delay_usecs = 0,
-		.speed_hz = MHZ_32,
+		.speed_hz = KHZ_500,
 		.bits_per_word = 8,
 	};
 
-	spi_transfer(fd,&block,1);
 
-	printf("rb.goo6: %d\n", rb.goo6);
+	while(1){
+		spi_transfer(fd, &mcp_tr, 1);
 
-	uint8_t tx[8] = {1,2,3,4,5,6,7,8};
-	uint8_t tx2[8] = {9,10,11,12,13,14,15,16};
+		// printf ("B "BYTETOBINARYPATTERN" ", BYTETOBINARY(mcp_tx >> 24));
+		// printf (""BYTETOBINARYPATTERN" ", BYTETOBINARY(mcp_tx >> 16));
+		// printf (""BYTETOBINARYPATTERN" ", BYTETOBINARY(mcp_tx >> 8));
+		// printf (""BYTETOBINARYPATTERN" ", BYTETOBINARY(mcp_tx));
+		// printf("\tbuf_tx: %u\n", mcp_tx);
 
-	uint8_t rx[8] = {0};
-	uint8_t rx2[8] = {0};
+		// mcp_rx |= 0xff000000;
+		// mcp_rx &= 0x00ffffff;
+		// mcp_rx = mcp_rx >> 0;
 
-	struct spi_ioc_transfer tr = {
-		.tx_buf = (unsigned long)tx,
-		.rx_buf = (unsigned long)rx,
-		.len = 8,
-		.delay_usecs = 0,
-		.speed_hz = MHZ_32,
-		.bits_per_word = 8,
-	};
+		uint32_t ret = 0;
+		ret |= (uint32_t)rx[3];
+		ret |= (uint32_t)rx[2] << 8;
+		ret |= (uint32_t)rx[1] << 16;
+		// ret |= (uint32_t)rx[0] << 24;
 
-	struct spi_ioc_transfer tr2 = {
-		.tx_buf = (unsigned long)tx2,
-		.rx_buf = (unsigned long)rx2,
-		.len = 8,
-		.delay_usecs = 0,
-		.speed_hz = MHZ_32,
-		.bits_per_word = 8,
-	};
+		print_byte(rx[0]);
+		print_byte(rx[1]);
+		print_byte(rx[2]);
+		print_byte(rx[3]);
+		printf(" rx %d", ret >> 6);
+		printf("\n");
 
-	// Transfer one message
-	spi_transfer(fd, &tr, 1);
+		// printf("%d\n", rx);
 
-	// Transfer with array of messages
-	struct spi_ioc_transfer list[2];
-	list[0] = tr;
-	list[1] = tr2;
+		// printf ("\nA "BYTETOBINARYPATTERN" ", BYTETOBINARY(mcp_rx >> 24));
+		// printf (""BYTETOBINARYPATTERN" ", BYTETOBINARY(mcp_rx >> 16));
+		// printf (""BYTETOBINARYPATTERN" ", BYTETOBINARY(mcp_rx >> 8));
+		// printf (""BYTETOBINARYPATTERN" ", BYTETOBINARY(mcp_rx));
+		// printf("\tbuf_rx: %u\n", mcp_rx);
 
-	spi_transfer(fd, list, 2);
-
-	for (int i = 0; i < 8; ++i)
-	{
-		printf("%d ",rx[i]);
+		nanosleep(&requested,&remaining);
 	}
-	printf("\n");
 
-	for (int i = 0; i < 8; ++i)
-	{
-		printf("%d ",rx2[i]);
-	}
-	printf("\n");
+	// uint16_t command = get_mcp_channel_command(0);
+	// printf ("Byte 00 "BYTETOBINARYPATTERN"\n", BYTETOBINARY((uint8_t)command));
+	// printf ("Byte 01 "BYTETOBINARYPATTERN"\n", BYTETOBINARY((uint8_t)command >> 8));
 
-	dumpstat("SPI device 0: ",fd);
+	// printf ("Byte 00 "BYTETOBINARYPATTERN"\n", BYTETOBINARY((uint8_t)0x8));
+	// printf ("Byte 01 "BYTETOBINARYPATTERN"\n", BYTETOBINARY((uint8_t)0x10));
+	// printf("command %d %s\n", command, &buf);
+
+	// dumpstat("SPI device 0: ",fd);
 
 	spi_close(fd);
 
 }
+
+static void print_byte(uint8_t byte){
+	printf (""BYTETOBINARYPATTERN" ", BYTETOBINARY(byte));
+} 
+
+static uint16_t get_mcp_channel_command(uint8_t chan){
+	// uint16_t command = 0;
+	// return command = (MCP3208_START_BIT | MCP3208_SINGLE_ENDED | chan); 
+	return 0;
+}
+
 
 static int spi_transfer(int fd, struct spi_ioc_transfer *tr, int len){
 	int err = ioctl(fd, SPI_IOC_MESSAGE(len), tr);
